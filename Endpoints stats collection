@@ -1,0 +1,37 @@
+const { redis } = require('./cache');
+
+async function recordEndpointLatency(ms) {
+  // keep counters
+  await redis.incr('endpoint:total_calls');
+  await redis.incrby('endpoint:total_latency_ms', ms);
+  // track min/max with simple techniques
+  await redis.setnx('endpoint:min_latency_ms', ms);
+  await redis.setnx('endpoint:max_latency_ms', ms);
+  await redis.eval(`
+    local min = redis.call('get','endpoint:min_latency_ms')
+    if tonumber(min) > tonumber(ARGV[1]) then redis.call('set','endpoint:min_latency_ms',ARGV[1]) end
+    local max = redis.call('get','endpoint:max_latency_ms')
+    if tonumber(max) < tonumber(ARGV[1]) then redis.call('set','endpoint:max_latency_ms',ARGV[1]) end
+  `, 0, ms);
+}
+
+async function getStats() {
+  const total_calls = parseInt(await redis.get('endpoint:total_calls') || '0');
+  const total_latency = parseInt(await redis.get('endpoint:total_latency_ms') || '0');
+  const min = parseInt(await redis.get('endpoint:min_latency_ms') || '0');
+  const max = parseInt(await redis.get('endpoint:max_latency_ms') || '0');
+  const avgEndpoint = total_calls ? Math.round(total_latency / total_calls) : 0;
+
+  const totalShopifyCalls = parseInt(await redis.get('shopify:total_calls') || '0');
+  const totalShopifyLatency = parseInt(await redis.get('shopify:total_latency_ms') || '0');
+  const avgShopify = totalShopifyCalls ? Math.round(totalShopifyLatency / totalShopifyCalls) : 0;
+
+  return {
+    endpoint_response_times_ms: { average: avgEndpoint, max, min },
+    total_endpoint_calls: total_calls,
+    average_shopify_call_responsetime_ms: avgShopify,
+    total_shopify_api_calls: totalShopifyCalls
+  };
+}
+
+module.exports = { recordEndpointLatency, getStats };
