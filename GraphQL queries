@@ -1,0 +1,32 @@
+const PRODUCTS_QUERY = `
+query ($first: Int!, $after: String) {
+  products(first: $first, after: $after, sortKey: TITLE) {
+    edges {
+      cursor
+      node {
+        id
+        title
+        createdAt
+        variants(first:1) {
+          edges { node { price } }
+        }
+        totalInventory
+      }
+    }
+    pageInfo { hasNextPage, endCursor }
+  }
+}
+`;
+
+const PRODUCT_BY_ID = `
+query ($id: ID!) {
+  product(id: $id) {
+    id
+    title
+    createdAt
+    totalInventory
+    variants(first: 1) { edges { node { price } } }
+  }
+}
+`;
+module.exports = { PRODUCTS_QUERY, PRODUCT_BY_ID };
