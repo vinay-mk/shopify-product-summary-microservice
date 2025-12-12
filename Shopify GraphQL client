@@ -1,0 +1,36 @@
+const axios = require('axios');
+const { redis } = require('./cache');
+
+const SHOP = process.env.SHOPIFY_STORE;
+const TOKEN = process.env.SHOPIFY_ADMIN_TOKEN;
+const SHOP_URL = `https://${SHOP}/admin/api/2024-10/graphql.json`; // use a stable API version
+
+async function shopifyRequest(query, variables = {}) {
+  const maxRetries = 4;
+  let attempt = 0;
+  while (true) {
+    const start = Date.now();
+    try {
+      const resp = await axios.post(SHOP_URL, { query, variables }, {
+        headers: { 'X-Shopify-Access-Token': TOKEN, 'Content-Type': 'application/json' },
+        timeout: 8000
+      });
+      const latency = Date.now() - start;
+      // update stats in redis
+      await redis.incr('shopify:total_calls');
+      await redis.incrby('shopify:total_latency_ms', latency);
+      return resp.data;
+    } catch (err) {
+      const status = err?.response?.status;
+      attempt++;
+      if ((status === 429 || !status) && attempt <= maxRetries) {
+        const backoff = 100 * 2 ** (attempt - 1) + Math.random() * 50;
+        await new Promise(r => setTimeout(r, backoff));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+module.exports = { shopifyRequest };
