@@ -1,0 +1,61 @@
+const express = require('express');
+const router = express.Router();
+const { shopifyRequest } = require('../services/shopifyClient');
+const { PRODUCTS_QUERY, PRODUCT_BY_ID } = require('../graphql/queries');
+const cache = require('../services/cache');
+const STATS = require('../services/stats');
+
+const CACHE_TTL = parseInt(process.env.CACHE_TTL_SECONDS || '60');
+
+router.get('/products', async (req, res) => {
+  const limit = Math.min(250, parseInt(req.query.limit || '20')); // Shopify limits
+  const cursor = req.query.cursor ? Buffer.from(req.query.cursor, 'base64').toString('utf8') : null;
+  const cacheKey = `products:list:limit:${limit}:cursor:${cursor||'null'}`;
+
+  const t0 = Date.now();
+  const cached = await cache.get(cacheKey);
+  if (cached) {
+    STATS.recordEndpointLatency(Date.now()-t0);
+    return res.json(cached);
+  }
+
+  const data = await shopifyRequest(PRODUCTS_QUERY, { first: limit, after: cursor });
+  // transform
+  const edges = data.data.products.edges;
+  const items = edges.map(e => ({
+    id: e.node.id,
+    title: e.node.title,
+    price: parseFloat(e.node.variants.edges[0]?.node?.price || '0'),
+    inventory: e.node.totalInventory || 0,
+    created_at: e.node.createdAt
+  }));
+  const next_page = data.data.products.pageInfo.hasNextPage ? Buffer.from(data.data.products.pageInfo.endCursor).toString('base64') : null;
+  const resBody = { products: items, next_page };
+  await cache.set(cacheKey, resBody, CACHE_TTL);
+  STATS.recordEndpointLatency(Date.now()-t0);
+  return res.json(resBody);
+});
+
+router.get('/products/:id', async (req, res) => {
+  const id = req.params.id; // expect full gid
+  const cacheKey = `product:id:${id}`;
+  const t0 = Date.now();
+  const cached = await cache.get(cacheKey);
+  if (cached) { STATS.recordEndpointLatency(Date.now()-t0); return res.json(cached); }
+
+  const data = await shopifyRequest(PRODUCT_BY_ID, { id });
+  const p = data.data.product;
+  if (!p) return res.status(404).send({error: 'Not found'});
+  const prod = {
+    id: p.id,
+    title: p.title,
+    price: parseFloat(p.variants.edges[0]?.node?.price || '0'),
+    inventory: p.totalInventory || 0,
+    created_at: p.createdAt
+  };
+  await cache.set(cacheKey, prod, CACHE_TTL);
+  STATS.recordEndpointLatency(Date.now()-t0);
+  return res.json(prod);
+});
+
+module.exports = router;
