@@ -1,0 +1,55 @@
+const axios = require('axios');
+
+class ProductSDK {
+  constructor(baseUrl, opts = {}) {
+    this.baseUrl = baseUrl;
+    this.queueSize = opts.queueSize || 100;
+    this.concurrent = opts.concurrent || 8;
+    this.active = 0;
+    this.queue = [];
+  }
+
+  async enqueue(fn) {
+    if (this.active < this.concurrent) {
+      this.active++;
+      try { return await fn(); } finally { this.active--; this._drain(); }
+    } else {
+      return new Promise((resolve, reject) => {
+        this.queue.push({fn, resolve, reject});
+      });
+    }
+  }
+  _drain(){
+    while(this.queue.length && this.active < this.concurrent){
+      const {fn, resolve, reject} = this.queue.shift();
+      this.active++;
+      fn().then(r => { this.active--; resolve(r); this._drain(); })
+           .catch(e => { this.active--; reject(e); this._drain(); });
+    }
+  }
+
+  async _request(path) {
+    return this.enqueue(async () => {
+      try {
+        const resp = await axios.get(`${this.baseUrl}${path}`);
+        return resp.data;
+      } catch (err) {
+        const status = err?.response?.status;
+        if (status === 429) {
+          // exponential retry once or twice
+          for (let i=0;i<3;i++){
+            await new Promise(r=>setTimeout(r, 100 * 2**i));
+            try { const r2 = await axios.get(`${this.baseUrl}${path}`); return r2.data; } catch(e){ if (i===2) throw e; }
+          }
+        }
+        throw err;
+      }
+    });
+  }
+
+  getProducts(limit, cursor){ return this._request(`/products?limit=${limit||20}${cursor?`&cursor=${cursor}`:''}`); }
+  getProductById(id){ return this._request(`/products/${encodeURIComponent(id)}`); }
+  getStats(){ return this._request(`/api-stats`); }
+}
+
+module.exports = ProductSDK;
