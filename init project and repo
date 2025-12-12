@@ -1,0 +1,8 @@
+mkdir shopify-product-summary
+cd shopify-product-summary
+git init
+npm init -y
+# install deps
+npm i express axios ioredis pino express-async-errors
+# dev deps
+npm i -D nodemon
