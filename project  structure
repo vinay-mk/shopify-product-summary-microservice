@@ -1,0 +1,11 @@
+/src
+  /server.js
+  /routes/products.js
+  /services/shopifyClient.js
+  /services/cache.js
+  /services/stats.js
+  /sdk/index.js   # published SDK used by customers
+  /graphql/queries.js
+/docker-compose.yml
+/Dockerfile
+/README.md
