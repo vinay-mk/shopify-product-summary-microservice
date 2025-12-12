@@ -1,0 +1,15 @@
+const Redis = require('ioredis');
+const redis = new Redis(process.env.REDIS_URL);
+
+module.exports = {
+  get: async (key) => {
+    const v = await redis.get(key);
+    return v ? JSON.parse(v) : null;
+  },
+  set: async (key, value, ttlSec) => {
+    await redis.set(key, JSON.stringify(value), 'EX', ttlSec);
+  },
+  del: async (key) => redis.del(key),
+  // helper for atomic counters, histograms
+  redis
+}
